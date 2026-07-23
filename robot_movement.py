@@ -4,19 +4,19 @@
 Robot Interactive Movement Controller
 WASD keyboard controls for movement with Q/E for rotation
 Uses Yahboom YB-ERF 01-v3.0 with 4 x 550 RPM omni wheels on Raspberry Pi 5
+
+Requires: pip install pynput
 """
 
 import time
-import sys
-import termios
-import tty
+from pynput import keyboard
 from sparkybotmini import SparkyBotMini
 
 # Motor speed and timing calibration
 # 550 RPM motors with omni wheels
 MOTOR_SPEED = 70  # 0-100 (70% power for smooth movement)
 
-# Key states
+# Key states - tracks which keys are currently held down
 key_pressed = {
     'w': False,  # Forward
     'a': False,  # Left
@@ -26,44 +26,40 @@ key_pressed = {
     'e': False,  # Turn right (clockwise)
 }
 
-def get_single_key():
-    """
-    Get a single key press without blocking.
-    Returns the key pressed or None if no key was pressed.
-    """
-    try:
-        # Set terminal to raw mode for non-blocking input
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        tty.setraw(fd)
-        
-        # Set non-blocking read with timeout
-        import select
-        ready, _, _ = select.select([sys.stdin], [], [], 0.01)
-        
-        if ready:
-            key = sys.stdin.read(1).lower()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            return key
-        else:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            return None
-    except:
-        return None
+# Control loop flag
+control_running = True
 
-def get_key_blocking():
+def on_press(key):
     """
-    Get a single key press, blocking until a key is pressed.
+    Callback for when a key is pressed.
     """
+    global key_pressed
     try:
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        tty.setraw(fd)
-        key = sys.stdin.read(1).lower()
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return key
-    except:
-        return None
+        # Get the character representation
+        char = key.char
+        if char and char.lower() in key_pressed:
+            key_pressed[char.lower()] = True
+    except AttributeError:
+        # Handle special keys if needed
+        pass
+
+def on_release(key):
+    """
+    Callback for when a key is released.
+    """
+    global key_pressed, control_running
+    try:
+        # Get the character representation
+        char = key.char
+        if char and char.lower() in key_pressed:
+            key_pressed[char.lower()] = False
+    except AttributeError:
+        pass
+    
+    # Exit on Ctrl+C
+    if key == keyboard.Key.esc:
+        control_running = False
+        return False
 
 def update_motor_commands(robot):
     """
@@ -116,14 +112,17 @@ def print_controls():
     print("  Q - Turn Left (Counter-Clockwise)")
     print("  E - Turn Right (Clockwise)")
     print("\n  Combine keys for diagonal movement!")
-    print("  Example: W+D = forward-right")
-    print("\nPress CTRL+C to exit\n")
+    print("  Example: Hold W+D = forward-right")
+    print("  Example: Hold W+E = forward while turning right")
+    print("\nPress ESC to exit\n")
     print("="*50 + "\n")
 
 def robot_interactive_control():
     """
-    Run interactive WASD keyboard control for the robot.
+    Run interactive WASD keyboard control for the robot with responsive key holding.
     """
+    global control_running
+    
     # Initialize robot
     robot = SparkyBotMini(port="/dev/ttyUSB0", baudrate=115200, debug=False)
     
@@ -147,48 +146,36 @@ def robot_interactive_control():
         
         print_controls()
         
+        # Set up keyboard listener
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        listener.start()
+        
+        print("✅ Keyboard listener active - Ready for control!\n")
+        
         # Main control loop
         last_state = None
+        iteration = 0
         
-        while True:
-            # Check for key input
-            key = get_single_key()
-            
-            if key:
-                if key in key_pressed:
-                    key_pressed[key] = True
-                elif key == '\x03':  # Ctrl+C in raw mode
-                    raise KeyboardInterrupt
-            
-            # Release keys on timeout (key up detection)
-            # This is a simple approach; you might want to track key-down/key-up events
-            # For now, we'll just update continuously and let keys naturally expire
-            
+        while control_running:
             # Update motor commands based on current key state
             update_motor_commands(robot)
             
-            # Print status every 10 iterations
+            # Print status when key state changes (throttled)
             current_state = key_pressed.copy()
             if current_state != last_state:
-                active_keys = [k for k, v in current_state.items() if v]
+                active_keys = [k.upper() for k, v in current_state.items() if v]
                 if active_keys:
-                    print(f"Keys pressed: {', '.join(active_keys).upper()}")
+                    print(f"🎮 Keys held: {' + '.join(active_keys)}")
                 else:
-                    print("Idle")
+                    print("➖ Idle")
                 last_state = current_state
             
-            # Reset key states after processing
-            for key in key_pressed:
-                key_pressed[key] = False
-            
-            time.sleep(0.05)  # 20 Hz update rate
+            iteration += 1
+            time.sleep(0.05)  # 20 Hz update rate for smooth control
         
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
-        robot.set_motor(0, 0, 0, 0)
-        print("✋ Motors stopped")
+        print("\n✋ Shutting down...")
         return True
-    
+        
     except Exception as e:
         print(f"\n❌ Error during movement: {e}")
         import traceback
@@ -206,6 +193,10 @@ def robot_interactive_control():
 
 
 if __name__ == "__main__":
+    print("Starting Robot Controller...\n")
+    print("Make sure pynput is installed:")
+    print("  pip install pynput\n")
+    
     success = robot_interactive_control()
     if success:
         print("\n🎉 Robot interactive control session ended successfully!")
