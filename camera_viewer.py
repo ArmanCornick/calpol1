@@ -27,7 +27,7 @@ current_frame = None
 frame_lock = threading.Lock()
 
 def init_camera():
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
     if not cap.isOpened():
         print("❌ Failed to open camera at index", CAMERA_INDEX)
         return None
