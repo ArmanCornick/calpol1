@@ -1,152 +1,131 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-Robot Square Movement Controller
-Moves robot in a square pattern: forward 2 feet, turn 90°, repeat 3 times
-Uses Yahboom YB-ERF 01-v3.0 with 4 x 550 RPM omni wheels.
+Robot Interactive Movement Controller
+WASD keyboard controls for movement with Q/E for rotation
+Uses Yahboom YB-ERF 01-v3.0 with 4 x 550 RPM omni wheels on Raspberry Pi 5
 """
 
 import time
+import sys
+import termios
+import tty
 from sparkybotmini import SparkyBotMini
 
 # Motor speed and timing calibration
 # 550 RPM motors with omni wheels
 MOTOR_SPEED = 70  # 0-100 (70% power for smooth movement)
 
-# Distance and rotation parameters
-FORWARD_DISTANCE_FEET = 2.0  # Move forward 2 feet per segment
-TARGET_DISTANCE_METERS = FORWARD_DISTANCE_FEET * 0.3048  # Convert to meters
+# Key states
+key_pressed = {
+    'w': False,  # Forward
+    'a': False,  # Left
+    's': False,  # Backward
+    'd': False,  # Right
+    'q': False,  # Turn left (counter-clockwise)
+    'e': False,  # Turn right (clockwise)
+}
 
-# Encoder calibration for 550 RPM motors with omni wheels
-# Adjust these values based on actual testing
-ENCODER_COUNTS_PER_METER = 1500  # Counts per meter traveled (needs tuning)
-ENCODER_COUNTS_PER_ROTATION = 3000  # Counts for full 360° rotation (needs tuning)
+def get_single_key():
+    """
+    Get a single key press without blocking.
+    Returns the key pressed or None if no key was pressed.
+    """
+    try:
+        # Set terminal to raw mode for non-blocking input
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        
+        # Set non-blocking read with timeout
+        import select
+        ready, _, _ = select.select([sys.stdin], [], [], 0.01)
+        
+        if ready:
+            key = sys.stdin.read(1).lower()
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            return key
+        else:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            return None
+    except:
+        return None
 
-# Square pattern: 3 segments (forward-turn-forward-turn-forward-turn, 3 times = 9 moves, but it forms a square after 4)
-# We'll do 3 complete cycles
-CYCLES = 3
+def get_key_blocking():
+    """
+    Get a single key press, blocking until a key is pressed.
+    """
+    try:
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        key = sys.stdin.read(1).lower()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return key
+    except:
+        return None
 
-def move_forward_distance(robot, distance_meters, motor_speed):
+def update_motor_commands(robot):
     """
-    Move robot forward for a specific distance
+    Update motor commands based on current key states.
+    Omni wheels allow for holonomic movement (can move in any direction).
     
-    Args:
-        robot: SparkyBotMini instance
-        distance_meters: Distance to travel in meters
-        motor_speed: Motor speed (0-100)
+    Motor layout (for omni wheels):
+    - Motor 1: Front-Left
+    - Motor 2: Front-Right
+    - Motor 3: Back-Right
+    - Motor 4: Back-Left
     """
-    target_encoder_delta = int(distance_meters * ENCODER_COUNTS_PER_METER)
+    speed = MOTOR_SPEED
     
-    print(f"  🚀 Moving forward {distance_meters:.2f}m ({distance_meters * 3.28084:.2f} ft) at {motor_speed}% speed...")
+    # Determine movement vector
+    forward = int(key_pressed['w']) - int(key_pressed['s'])  # -1, 0, or 1
+    strafe = int(key_pressed['d']) - int(key_pressed['a'])   # -1, 0, or 1
     
-    # Get initial encoder readings
-    initial_encoders = robot.get_encoders()
-    print(f"     Initial encoders: {initial_encoders}")
+    # Determine rotation
+    rotate = int(key_pressed['e']) - int(key_pressed['q'])   # -1 (CCW), 0, or 1 (CW)
     
-    # Start movement - all motors same direction for forward motion
-    robot.set_motor(motor_speed, motor_speed, motor_speed, motor_speed)
+    # Holonomic motor commands for omni wheels
+    # Each motor gets a combination of forward, strafe, and rotation components
+    m1 = forward * speed - strafe * speed + rotate * speed  # Front-Left
+    m2 = forward * speed + strafe * speed - rotate * speed  # Front-Right
+    m3 = forward * speed + strafe * speed + rotate * speed  # Back-Right
+    m4 = forward * speed - strafe * speed - rotate * speed  # Back-Left
     
-    # Monitor movement
-    start_time = time.time()
-    max_movement_time = 15.0  # Safety timeout
+    # Clamp values to [-100, 100]
+    m1 = max(-100, min(100, m1))
+    m2 = max(-100, min(100, m2))
+    m3 = max(-100, min(100, m3))
+    m4 = max(-100, min(100, m4))
     
-    while time.time() - start_time < max_movement_time:
-        current_encoders = robot.get_encoders()
-        
-        # Calculate average encoder delta
-        encoder_deltas = [abs(current_encoders[i] - initial_encoders[i]) for i in range(4)]
-        avg_delta = sum(encoder_deltas) / 4
-        
-        elapsed = time.time() - start_time
-        
-        # Print progress every 0.5 seconds
-        if int(elapsed * 2) % 1 == 0:
-            print(f"     ⏱️  {elapsed:.1f}s | Encoder delta (avg): {avg_delta:.0f}/{target_encoder_delta} | "
-                  f"Individual: {[f'{d:.0f}' for d in encoder_deltas]}")
-        
-        # Check if we've traveled the target distance
-        if avg_delta >= target_encoder_delta:
-            print(f"     ✅ Distance reached: {avg_delta:.0f} counts")
-            break
-        
-        time.sleep(0.1)
-    
-    # Stop movement
-    robot.set_motor(0, 0, 0, 0)
-    time.sleep(0.2)
-    
-    final_encoders = robot.get_encoders()
-    final_deltas = [abs(final_encoders[i] - initial_encoders[i]) for i in range(4)]
-    print(f"     Final encoders: {final_encoders} | Deltas: {final_deltas}\n")
+    # Send command to robot
+    robot.set_motor(m1, m2, m3, m4)
 
-def turn_90_degrees(robot, motor_speed, clockwise=True):
+def print_controls():
     """
-    Turn robot 90 degrees in place
-    
-    Args:
-        robot: SparkyBotMini instance
-        motor_speed: Motor speed (0-100)
-        clockwise: True for clockwise, False for counter-clockwise
+    Print control instructions to the user.
     """
-    target_encoder_delta = int(ENCODER_COUNTS_PER_ROTATION / 4)  # 90° = 1/4 rotation
-    
-    direction_str = "clockwise (right)" if clockwise else "counter-clockwise (left)"
-    print(f"  🔄 Turning 90° {direction_str} at {motor_speed}% speed...")
-    
-    # Get initial encoder readings
-    initial_encoders = robot.get_encoders()
-    print(f"     Initial encoders: {initial_encoders}")
-    
-    # For omni wheels: clockwise rotation
-    # Motor configuration for 90° turn (in-place rotation):
-    # Clockwise: left motors forward, right motors backward
-    # Counter-clockwise: left motors backward, right motors forward
-    if clockwise:
-        # Motors 1,2 (left) forward; Motors 3,4 (right) backward
-        robot.set_motor(motor_speed, motor_speed, -motor_speed, -motor_speed)
-    else:
-        # Motors 1,2 (left) backward; Motors 3,4 (right) forward
-        robot.set_motor(-motor_speed, -motor_speed, motor_speed, motor_speed)
-    
-    # Monitor rotation
-    start_time = time.time()
-    max_rotation_time = 10.0  # Safety timeout
-    
-    while time.time() - start_time < max_rotation_time:
-        current_encoders = robot.get_encoders()
-        
-        # Calculate average encoder delta
-        encoder_deltas = [abs(current_encoders[i] - initial_encoders[i]) for i in range(4)]
-        avg_delta = sum(encoder_deltas) / 4
-        
-        elapsed = time.time() - start_time
-        
-        # Print progress every 0.5 seconds
-        if int(elapsed * 2) % 1 == 0:
-            print(f"     ⏱️  {elapsed:.1f}s | Encoder delta (avg): {avg_delta:.0f}/{target_encoder_delta} | "
-                  f"Individual: {[f'{d:.0f}' for d in encoder_deltas]}")
-        
-        # Check if we've completed the 90° turn
-        if avg_delta >= target_encoder_delta:
-            print(f"     ✅ 90° turn completed: {avg_delta:.0f} counts")
-            break
-        
-        time.sleep(0.1)
-    
-    # Stop rotation
-    robot.set_motor(0, 0, 0, 0)
-    time.sleep(0.2)
-    
-    final_encoders = robot.get_encoders()
-    final_deltas = [abs(final_encoders[i] - initial_encoders[i]) for i in range(4)]
-    print(f"     Final encoders: {final_encoders} | Deltas: {final_deltas}\n")
+    print("\n" + "="*50)
+    print("🤖 Robot Interactive Movement Controller")
+    print("="*50)
+    print("\n📋 Controls:")
+    print("  W - Move Forward")
+    print("  A - Strafe Left")
+    print("  S - Move Backward")
+    print("  D - Strafe Right")
+    print("  Q - Turn Left (Counter-Clockwise)")
+    print("  E - Turn Right (Clockwise)")
+    print("\n  Combine keys for diagonal movement!")
+    print("  Example: W+D = forward-right")
+    print("\nPress CTRL+C to exit\n")
+    print("="*50 + "\n")
 
-def robot_square_pattern():
+def robot_interactive_control():
     """
-    Execute square pattern movement: forward 2ft, turn 90°, repeat 3 times
+    Run interactive WASD keyboard control for the robot.
     """
     # Initialize robot
-    robot = SparkyBotMini(port="/dev/ttyUSB0", baudrate=115200, debug=True)
+    robot = SparkyBotMini(port="/dev/ttyUSB0", baudrate=115200, debug=False)
     
     try:
         # Connect to robot
@@ -164,31 +143,56 @@ def robot_square_pattern():
         
         # Get firmware version
         version = robot.get_version()
-        print(f"🔧 Firmware version: v{version}\n")
+        print(f"🔧 Firmware version: v{version}")
         
-        print(f"📋 Starting square pattern: {CYCLES} cycles")
-        print(f"   Each cycle: 2 ft forward → 90° turn\n")
+        print_controls()
         
-        # Execute square pattern
-        for cycle in range(CYCLES):
-            print(f"▶️  Cycle {cycle + 1}/{CYCLES}\n")
+        # Main control loop
+        last_state = None
+        
+        while True:
+            # Check for key input
+            key = get_single_key()
             
-            # Move forward
-            move_forward_distance(robot, TARGET_DISTANCE_METERS, MOTOR_SPEED)
+            if key:
+                if key in key_pressed:
+                    key_pressed[key] = True
+                elif key == '\x03':  # Ctrl+C in raw mode
+                    raise KeyboardInterrupt
             
-            # Turn 90 degrees clockwise
-            turn_90_degrees(robot, MOTOR_SPEED, clockwise=True)
-        
-        print("✅ Square pattern complete!")
-        return True
+            # Release keys on timeout (key up detection)
+            # This is a simple approach; you might want to track key-down/key-up events
+            # For now, we'll just update continuously and let keys naturally expire
+            
+            # Update motor commands based on current key state
+            update_motor_commands(robot)
+            
+            # Print status every 10 iterations
+            current_state = key_pressed.copy()
+            if current_state != last_state:
+                active_keys = [k for k, v in current_state.items() if v]
+                if active_keys:
+                    print(f"Keys pressed: {', '.join(active_keys).upper()}")
+                else:
+                    print("Idle")
+                last_state = current_state
+            
+            # Reset key states after processing
+            for key in key_pressed:
+                key_pressed[key] = False
+            
+            time.sleep(0.05)  # 20 Hz update rate
         
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
         robot.set_motor(0, 0, 0, 0)
-        return False
+        print("✋ Motors stopped")
+        return True
     
     except Exception as e:
         print(f"\n❌ Error during movement: {e}")
+        import traceback
+        traceback.print_exc()
         robot.set_motor(0, 0, 0, 0)
         return False
     
@@ -202,8 +206,8 @@ def robot_square_pattern():
 
 
 if __name__ == "__main__":
-    success = robot_square_pattern()
+    success = robot_interactive_control()
     if success:
-        print("\n🎉 Robot square pattern test successful!")
+        print("\n🎉 Robot interactive control session ended successfully!")
     else:
-        print("\n💥 Robot square pattern test failed!")
+        print("\n💥 Robot interactive control session failed!")
