@@ -6,7 +6,7 @@ import time
 
 cap = cv2.VideoCapture(0)
 
-# Low resolution to reduce work for the robot
+# Low resolution and low FPS to reduce robot processing
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
 cap.set(cv2.CAP_PROP_FPS, 5)
@@ -15,8 +15,10 @@ cap.set(cv2.CAP_PROP_FPS, 5)
 lower_green = np.array([40, 76, 38], dtype=np.uint8)
 upper_green = np.array([80, 255, 255], dtype=np.uint8)
 
-cv2.namedWindow("Isolated Green Object", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Isolated Green Object", 240, 180)
+kernel = np.ones((3, 3), dtype=np.uint8)
+
+cv2.namedWindow("Binary Green Object", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Binary Green Object", 240, 180)
 
 while True:
     start_time = time.time()
@@ -27,14 +29,46 @@ while True:
         print("Failed to grab frame")
         break
 
-    # Convert frame to HSV for green detection
+    # Convert camera frame from BGR to HSV
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # Find green pixels
-    green_mask = cv2.inRange(
+    # Binary detection:
+    # green object = 255 (white)
+    # everything else = 0 (black)
+    binary_mask = cv2.inRange(
         hsv,
         lower_green,
         upper_green
+    )
+
+    # Remove small white noise
+    binary_mask = cv2.morphologyEx(
+        binary_mask,
+        cv2.MORPH_OPEN,
+        kernel
+    )
+
+    # Fill small black gaps inside the detected object
+    binary_mask = cv2.morphologyEx(
+        binary_mask,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
+
+    cv2.imshow("Binary Green Object", binary_mask)
+
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+    # Limit processing to about 5 FPS
+    elapsed = time.time() - start_time
+    sleep_time = 0.2 - elapsed
+
+    if sleep_time > 0:
+        time.sleep(sleep_time)
+
+cap.release()
+cv2.destroyAllWindows()        upper_green
     )
 
     # Remove small dots/noise
