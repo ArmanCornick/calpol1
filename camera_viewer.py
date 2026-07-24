@@ -20,7 +20,7 @@ upper_green = np.array([80, 255, 255], dtype=np.uint8)
 kernel = np.ones((3, 3), dtype=np.uint8)
 
 # --- Init ---
-bot = SparkyBotMini()
+bot = SparkyBotMini(port='/dev/ttyUSB0')
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
@@ -81,13 +81,12 @@ while True:
                 turn = int(np.clip(output * MAX_TURN_SPEED, -MAX_TURN_SPEED, MAX_TURN_SPEED))
                 bot.set_motor(-turn, turn, -turn, turn)
 
-            cv2.circle(frame, (int(cx), frame_h // 2), 5, (0, 255, 0), -1)
+            cv2.circle(mask, (int(cx), frame_h // 2), 5, (128), 2)
         else:
             stop()
 
-    display = cv2.bitwise_and(frame, frame, mask=mask)
-    cv2.line(display, (frame_w // 2, 0), (frame_w // 2, frame_h), (255, 255, 255), 1)
-    cv2.imshow("Corn Tracker", display)
+    cv2.line(mask, (frame_w // 2, 0), (frame_w // 2, frame_h), (128), 1)
+    cv2.imshow("Corn Tracker", mask)
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
