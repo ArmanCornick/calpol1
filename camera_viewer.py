@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 import time
-from sparkybotmini import SparkybotMini
+from sparkybotmini import SparkyBotMini
 
 # --- PID Tuning ---
 KP = 0.15   # Proportional: how hard it reacts to error
@@ -20,7 +20,7 @@ upper_green = np.array([80, 255, 255], dtype=np.uint8)
 kernel = np.ones((3, 3), dtype=np.uint8)
 
 # --- Init ---
-bot = SparkybotMini()
+bot = SparkyBotMini()
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
