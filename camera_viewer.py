@@ -21,6 +21,9 @@ kernel = np.ones((3, 3), dtype=np.uint8)
 
 # --- Init ---
 bot = SparkyBotMini(port='/dev/ttyUSB0')
+if not bot.connect():
+    print("Failed to connect to robot")
+    exit()
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 160)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 120)
